@@ -1,0 +1,384 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Parameters:
+  AppName:
+    Description: project or application identifier
+    Type: String
+    Default: my-awesome-app
+  Env:
+    Description: environment
+    Type: String
+    AllowedValues:
+      - test
+      - qa
+      - staging
+      - production
+    Default: test
+  KeyPair:
+    Description: EC2 key pair
+    Type: AWS::EC2::KeyPair::KeyName
+  TaskDefinitionCpu:
+    Description: cpu for task definition
+    Type: Number
+    Default: 256
+  TaskDefinitionMemory:
+    Description: memory for task definition
+    Type: Number
+    Default: 450
+  ContainerDefinitionMemory:
+    Description: memory for container definition
+    Type: Number
+    Default: 450
+  ServiceDesiredCount:
+    Description: desired count for ECS Service
+    Type: Number
+    Default: 1
+  InstanceType:
+    Description: ec2 instance type
+    Type: String
+    AllowedValues:
+      - t3.nano
+      - t3.micro
+      - t3.small
+      - t3.medium
+      - t3.large
+      - t3.xlarge
+      - t3.2xlarge
+    Default: t3.micro # memory 1GB
+  ApplicationPort:
+    Description: puma listening port
+    Type: Number
+    Default: 80
+Mappings:
+  RegionMap:  
+    ap-northeast-1:
+      # Amazon ECS-optimized Amazon Linux 2 AMI ID
+      AMI: ami-057631c6a4834e06d
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+  ALBSubnet1a:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: ap-northeast-1a
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: true
+  ALBSubnet1c:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: ap-northeast-1c
+      CidrBlock: 10.0.2.0/24
+      MapPublicIpOnLaunch: true
+  EC2Subnet1a:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: ap-northeast-1a
+      CidrBlock: 10.0.3.0/24
+      MapPublicIpOnLaunch: true
+  EC2Subnet1c:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: ap-northeast-1c
+      CidrBlock: 10.0.4.0/24
+      MapPublicIpOnLaunch: true
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+  GatewayToInternet:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+  InternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: GatewayToInternet
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  ALB1aSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref ALBSubnet1a
+      RouteTableId: !Ref PublicRouteTable
+  ALB1cSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref ALBSubnet1c
+      RouteTableId: !Ref PublicRouteTable
+  PublicSubnet1aRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref EC2Subnet1a
+      RouteTableId: !Ref PublicRouteTable
+  PublicSubnet1cRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref EC2Subnet1c
+      RouteTableId: !Ref PublicRouteTable
+  
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub ${AppName}-${Env}-alb
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+  ALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub ${AppName}-${Env}
+      Scheme: internet-facing
+      LoadBalancerAttributes:
+        - Key: access_logs.s3.enabled
+          Value: false
+        - Key: deletion_protection.enabled
+          Value: false
+        - Key: idle_timeout.timeout_seconds
+          Value: 60
+        - Key: routing.http2.enabled
+          Value: true
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Subnets: 
+        - !Ref ALBSubnet1a
+        - !Ref ALBSubnet1c
+  ALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref VPC
+      Name: !Sub ${AppName}-${Env}
+      Protocol: HTTP
+      Port: 80
+      TargetType: instance
+    DependsOn: ALB
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - TargetGroupArn: !Ref ALBTargetGroup
+          Type: forward
+      LoadBalancerArn: !Ref ALB
+      Port: 80
+      Protocol: HTTP
+    DependsOn: ALBTargetGroup
+  ECR:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${AppName}-${Env}
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Delete more than 15 images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 15
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub ${AppName}-${Env}
+  ECSLogsGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub ${AppName}-${Env}
+  ECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AppName}-${Env}-ecs-task
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns: 
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy # ECS Task Execution
+      Policies:
+        - PolicyName: ParameterStoreAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameterHistory
+                  - ssm:GetParametersByPath
+                  - ssm:GetParameters
+                  - ssm:GetParameter
+                Resource:
+                  - !Sub arn:aws:ssm:*:${AWS::AccountId}:parameter/${AppName}/${Env}/*
+              - Effect: Allow
+                Action:
+                  - ssm:DescribeParameters
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                Resource:
+                  - "*"
+  ECSTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties: 
+      Cpu: !Ref TaskDefinitionCpu
+      Memory: !Ref TaskDefinitionMemory
+      RequiresCompatibilities:
+        - EC2
+        # - FARGATE
+      ExecutionRoleArn: !Ref ECSTaskRole
+      Family: !Sub ${AppName}-${Env}
+      TaskRoleArn: !Ref ECSTaskRole
+      # NetworkMode: awsvpc
+      NetworkMode: bridge
+      ContainerDefinitions:
+        - Name: !Sub ${AppName}-${Env}
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ECR}
+          MemoryReservation: !Ref ContainerDefinitionMemory
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-create-group: true
+              awslogs-group: !Ref ECSLogsGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: awesome
+          Command:
+            - bundle
+            - exec 
+            - puma 
+            - -C 
+            - config/puma/production.rb 
+            - -p
+            - !Ref ApplicationPort
+          PortMappings:
+            - ContainerPort: !Ref ApplicationPort
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - curl -f http://localhost/
+              - "|| exit 1"
+            StartPeriod: 60
+          Essential: true
+          Environment:
+            - Name: RAILS_LOG_TO_STDOUT
+              Value: 1
+            - Name: DB_HOST
+              Value: hoge
+            - Name: DB_USERNAME
+              Value: hoge
+            - Name: DB_PASSWORD
+              Value: hoge
+            - Name: RAILS_ENV
+              Value: production
+            - Name: SECRET_KEY_BASE
+              Value: hoge
+          # Secrets:
+            # - Name: AWS_REGION
+              # ValueFrom: !Sub /${AppName}/${Env}/AWS_REGION
+            # - Name: DB_HOST
+            #   ValueFrom: !Sub /${AppName}/${Env}/DB_HOST
+            # - Name: DB_USERNAME
+            #   ValueFrom: !Sub /${AppName}/${Env}/DB_USERNAME
+            # - Name: DB_PASSWORD
+            #   ValueFrom: !Sub /${AppName}/${Env}/DB_PASSWORD
+            # - Name: RAILS_ENV
+            #   ValueFrom: !Sub /${AppName}/${Env}/RAILS_ENV
+            # - Name: SECRET_KEY_BASE
+            #   ValueFrom: !Sub /${AppName}/${Env}/SECRET_KEY_BASE
+  ECSService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref ECSCluster
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 50
+      DesiredCount: !Ref ServiceDesiredCount
+      LaunchType: EC2
+      LoadBalancers:
+        - ContainerName: !Sub ${AppName}-${Env}
+          ContainerPort: !Ref ApplicationPort
+          TargetGroupArn: !Ref ALBTargetGroup
+      ServiceName: !Sub ${AppName}-${Env}
+      TaskDefinition: !Ref ECSTaskDefinition
+  EC2Role:  
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:  
+        Version: "2012-10-17"
+        Statement:   
+          - Effect: Allow  
+            Principal:   
+              Service:   
+                - ec2.amazonaws.com
+            Action:   
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+      RoleName: !Sub ${AppName}-${Env}-ec2
+  EC2InstanceProfile:  
+    Type: AWS::IAM::InstanceProfile  
+    Properties:   
+      Roles:  
+        - !Ref EC2Role
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub ${AppName}-${Env}-ec2
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref ApplicationPort
+          ToPort: !Ref ApplicationPort
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 32768
+          ToPort: 61000
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+  EC2Instance1:
+    Type: AWS::EC2::Instance
+    Properties:
+      AvailabilityZone: ap-northeast-1a
+      ImageId: !FindInMap [ RegionMap, !Ref "AWS::Region", AMI ]
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyPair
+      SecurityGroupIds:
+        - !Ref EC2SecurityGroup
+      SubnetId: !Ref EC2Subnet1a
+      Tenancy: default
+      UserData: 
+         Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          echo ECS_CLUSTER=${ECSCluster} >> /etc/ecs/ecs.config
+Outputs:
+  ECSCluster:
+    Value: !Ref ECSCluster
+    Export:
+      Name: !Sub ${AppName}-${Env}-ecs-cluster
+  ECSServiceName:
+    Value: !GetAtt ECSService.Name
+    Export:
+      Name: !Sub ${AppName}-${Env}-ecs-service-name
