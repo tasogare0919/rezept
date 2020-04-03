@@ -1,0 +1,74 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Parameters:
+  AppName:
+    Type: String
+Mappings:
+  CIDR:
+    VPC:
+      Common: 192.168.0.0/16
+    PublicSubnet:
+      1a: 192.168.1.0/24
+      1c: 192.168.2.0/24
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !FindInMap [ CIDR, VPC, Common ]
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+  PublicSubnet1a:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: ap-northeast-1a
+      CidrBlock: !FindInMap [ CIDR, PublicSubnet, 1a ]
+      MapPublicIpOnLaunch: true
+  PublicSubnet1c:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: ap-northeast-1c
+      CidrBlock: !FindInMap [ CIDR, PublicSubnet, 1c ]
+      MapPublicIpOnLaunch: true
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+  GatewayToInternet:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+  InternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: GatewayToInternet
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  PublicSubnet1aRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1a
+      RouteTableId: !Ref PublicRouteTable
+  PublicSubnet1cRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1c
+      RouteTableId: !Ref PublicRouteTable
+  PrivateDNSNamespace:
+    Type: AWS::ServiceDiscovery::PrivateDnsNamespace
+    Properties:
+        Name: !Sub osushi.service
+        Vpc: !Ref VPC
+Outputs:
+  VPCID:
+    Value: !Ref VPC
+  PrivateDNSNamespaceId:
+    Value: !Ref PrivateDNSNamespace
+  PublicSubnet1a:
+    Value: !Ref PublicSubnet1a
+  PublicSubnet1c:
+    Value: !Ref PublicSubnet1c

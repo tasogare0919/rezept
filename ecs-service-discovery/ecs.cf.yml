@@ -1,0 +1,141 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Parameters:
+  AppName:
+    Type: String
+  TaskDefinitionCpu:
+    Type: Number
+  TaskDefinitionMemory:
+    Type: Number
+  AppMemory:
+    Type: Number
+  NginxMemory:
+    Type: Number
+  ServiceDesiredCount:
+    Type: Number
+  Port:
+    Type: Number
+  VPCID:
+    Type: String
+  PublicSubnet1a:
+    Type: String
+  PrivateDNSNamespaceID:
+    Type: String
+Resources:
+  ECR:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Ref AppName
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Ref AppName
+  ECSLogsGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Ref AppName
+  ECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AppName}-ecs-task
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns: 
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+  ECSTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties: 
+      Cpu: !Ref TaskDefinitionCpu
+      Memory: !Ref TaskDefinitionMemory
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !Ref ECSTaskRole
+      TaskRoleArn: !Ref ECSTaskRole
+      NetworkMode: awsvpc
+      ContainerDefinitions:
+        - Name: app
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ECR}:latest
+          MemoryReservation: !Ref AppMemory
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-create-group: true
+              awslogs-group: !Ref ECSLogsGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: !Sub ${AppName}-app
+          Command:
+            - bundle
+            - exec 
+            - pumactl
+            - start
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - "ps aux | grep puma | grep -v grep"
+              - "|| exit 1"
+            StartPeriod: 15
+          Essential: true
+          Environment:
+            - Name: APP_ENV
+              Value: production
+        - Name: nginx
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ECR}:nginx_latest
+          MemoryReservation: !Ref NginxMemory
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-create-group: true
+              awslogs-group: !Ref ECSLogsGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: !Sub ${AppName}-nginx
+          PortMappings:
+            - ContainerPort: !Ref Port
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - curl -f http://localhost/
+              - "|| exit 1"
+            StartPeriod: 30
+          Essential: true
+          DependsOn:
+            - Condition: HEALTHY
+              ContainerName: app
+          VolumesFrom:
+            - ReadOnly: true
+              SourceContainer: app
+  ECSService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref ECSCluster
+      DesiredCount: !Ref ServiceDesiredCount
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets:
+            - !Ref PublicSubnet1a
+      ServiceName: !Ref AppName
+      TaskDefinition: !Ref ECSTaskDefinition
+      ServiceRegistries:
+        - ContainerName: nginx
+          ContainerPort: !Ref Port
+          RegistryArn: !GetAtt DiscoveryService.Arn
+  DiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties: 
+      Description: discovery service
+      DnsConfig:
+        RoutingPolicy: MULTIVALUE
+        DnsRecords:
+          - TTL: 60
+            Type: A
+          - TTL: 60
+            Type: SRV
+      Name: myapp
+      NamespaceId: !Ref PrivateDNSNamespaceID
