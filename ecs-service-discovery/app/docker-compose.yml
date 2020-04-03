@@ -1,0 +1,23 @@
+version: '3'
+services:
+  app:
+    environment:
+      TZ: Asia/Tokyo
+    build: ./
+    command: bundle exec pumactl start
+    volumes:
+      - .:/usr/src/app
+      - bundle_cache:/usr/local/bundle
+      - puma_socket:/usr/src/app/tmp/sockets
+  nginx:
+    build: ./docker/nginx/
+    image: nginx:latest
+    ports:
+      - 8080:80
+    volumes: 
+      - puma_socket:/usr/src/app/tmp/sockets
+    depends_on:
+      - app
+volumes:
+  bundle_cache:
+  puma_socket:

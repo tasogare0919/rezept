@@ -1,0 +1,7 @@
+.bundle
+.dockerignore
+.env
+.git
+log
+node_modules
+vendor/bundle
