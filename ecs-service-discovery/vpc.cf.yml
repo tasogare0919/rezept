@@ -7,8 +7,9 @@ Mappings:
     VPC:
       Common: 192.168.0.0/16
     PublicSubnet:
-      1a: 192.168.1.0/24
-      1c: 192.168.2.0/24
+      1a: 192.168.10.0/24
+    PrivateSubnet:
+      1c: 192.168.11.0/24
 Resources:
   VPC:
     Type: AWS::EC2::VPC
@@ -16,20 +17,20 @@ Resources:
       CidrBlock: !FindInMap [ CIDR, VPC, Common ]
       EnableDnsHostnames: true
       EnableDnsSupport: true
-  PublicSubnet1a:
+  PublicSubnet:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref VPC
       AvailabilityZone: ap-northeast-1a
       CidrBlock: !FindInMap [ CIDR, PublicSubnet, 1a ]
       MapPublicIpOnLaunch: true
-  PublicSubnet1c:
+  PrivateSubnet:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref VPC
       AvailabilityZone: ap-northeast-1c
-      CidrBlock: !FindInMap [ CIDR, PublicSubnet, 1c ]
-      MapPublicIpOnLaunch: true
+      CidrBlock: !FindInMap [ CIDR, PrivateSubnet, 1c ]
+      MapPublicIpOnLaunch: false
   InternetGateway:
     Type: AWS::EC2::InternetGateway
   GatewayToInternet:
@@ -48,27 +49,48 @@ Resources:
       RouteTableId: !Ref PublicRouteTable
       DestinationCidrBlock: 0.0.0.0/0
       GatewayId: !Ref InternetGateway
-  PublicSubnet1aRouteTableAssociation:
+  PublicSubnetRouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      SubnetId: !Ref PublicSubnet1a
+      SubnetId: !Ref PublicSubnet
       RouteTableId: !Ref PublicRouteTable
-  PublicSubnet1cRouteTableAssociation:
+  EIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+  NAT:
+    Type: AWS::EC2::NatGateway
+    Properties: 
+      AllocationId: !GetAtt EIP.AllocationId
+      SubnetId: !Ref PublicSubnet
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+  NatRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NAT
+  PrivateSubnetRouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      SubnetId: !Ref PublicSubnet1c
-      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PrivateSubnet
+      RouteTableId: !Ref PrivateRouteTable
   PrivateDNSNamespace:
     Type: AWS::ServiceDiscovery::PrivateDnsNamespace
     Properties:
-        Name: !Sub osushi.service
+        Name: osushi.service
         Vpc: !Ref VPC
 Outputs:
   VPCID:
     Value: !Ref VPC
   PrivateDNSNamespaceId:
     Value: !Ref PrivateDNSNamespace
-  PublicSubnet1a:
-    Value: !Ref PublicSubnet1a
-  PublicSubnet1c:
-    Value: !Ref PublicSubnet1c
+  PublicSubnet:
+    Value: !Ref PublicSubnet
+  PublicSubnetCIDR:
+    Value: !FindInMap [ CIDR, PublicSubnet, 1a ]
+  PrivateSubnet:
+    Value: !Ref PrivateSubnet
