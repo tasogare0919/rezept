@@ -75,7 +75,7 @@ Resources:
           HealthCheck:
             Command:
               - CMD-SHELL
-              - "ps aux | grep puma | grep -v grep"
+              - curl --unix-socket /usr/src/app/tmp/sockets/puma.sock ./
               - "|| exit 1"
             StartPeriod: 15
           Essential: true
