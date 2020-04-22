@@ -1,0 +1,52 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Parameters:
+  AppName:
+    Description: project or application identifier
+    Type: String
+    Default: puma-with-nginx
+  TaskDefinitionCpu:
+    Description: cpu for task definition
+    Type: Number
+    Default: 256
+  TaskDefinitionMemory:
+    Description: memory for task definition
+    Type: Number
+    Default: 1024
+  AppMemory:
+    Description: memory for app container definition
+    Type: Number
+    Default: 512
+  NginxMemory:
+    Description: memory for nginx container definition
+    Type: Number
+    Default: 512
+  ServiceDesiredCount:
+    Description: desired count for ECS Service
+    Type: Number
+    Default: 1
+  Port:
+    Description: nginx listening port
+    Type: Number
+    Default: 80
+Resources:
+  VPC:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: "https://cf-templatess-sakuraya.s3-ap-northeast-1.amazonaws.com/puma-with-nginx/vpc.cf.yml"
+      Parameters:
+        AppName: !Ref AppName
+  ECS:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: "https://cf-templatess-sakuraya.s3-ap-northeast-1.amazonaws.com/puma-with-nginx/ecs.cf.yml"
+      Parameters:
+        AppName: !Ref AppName
+        TaskDefinitionCpu: !Ref TaskDefinitionCpu
+        TaskDefinitionMemory: !Ref TaskDefinitionMemory
+        AppMemory: !Ref AppMemory
+        NginxMemory: !Ref NginxMemory
+        ServiceDesiredCount: !Ref ServiceDesiredCount
+        Port: !Ref Port
+        VPCID: !GetAtt VPC.Outputs.VPCID
+        PublicSubnet: !GetAtt VPC.Outputs.PublicSubnet
+
