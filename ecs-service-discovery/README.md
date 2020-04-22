@@ -1,5 +1,7 @@
 # ecs-service-discovery
 
+cf. [ECSのサービスディスカバリーを試す](https://bluepixel.hatenablog.com/entry/2020/04/05/233445)
+
 sample architecture using ecs service discovery.
 this directory includes sample sinatra application and CloufFormation templates.
 
