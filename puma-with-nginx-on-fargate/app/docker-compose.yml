@@ -1,0 +1,26 @@
+version: '3'
+services:
+  app:
+    environment:
+      TZ: Asia/Tokyo
+    build: 
+      context: ./
+      args:
+        - DEPLOYMENT=false
+    command: bundle exec pumactl start
+    volumes:
+      - .:/usr/src/app
+      - bundle:/usr/local/bundle
+      - tmp:/usr/src/app/tmp
+  nginx:
+    build: ./nginx/
+    image: nginx:latest
+    ports:
+      - 8080:80
+    volumes: 
+      - tmp:/usr/src/app/tmp
+    depends_on:
+      - app
+volumes:
+  bundle:
+  tmp:
