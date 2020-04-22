@@ -1,5 +1,7 @@
 # puma-with-nginx-on-fargate
 
+cf. [Fargateにおけるpuma+Nginxのソケット通信のやり方](https://bluepixel.hatenablog.com/entry/2020/04/22/230721)
+
 sample architecture for puma with Nginx on Fargate.
 this directory includes sample sinatra application and CloufFormation templates.
 
