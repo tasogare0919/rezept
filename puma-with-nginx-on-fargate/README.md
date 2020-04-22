@@ -1,4 +1,4 @@
-# ecs-service-discovery
+# puma-with-nginx-on-fargate
 
 sample architecture for puma with Nginx on Fargate.
 this directory includes sample sinatra application and CloufFormation templates.
