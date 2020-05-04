@@ -1,0 +1,141 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Parameters:
+  Name:
+    Description: identifier
+    Type: String
+    Default: test-s3-event20200504
+  Email:
+    Description: email address
+    Type: String
+Resources:
+  Topic:
+    Type: AWS::SNS::Topic
+    Properties: 
+      DisplayName: !Ref Name
+      TopicName: !Ref Name
+
+  TopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties: 
+      PolicyDocument:
+        Id: 1
+        Version: "2012-10-17"
+        Statement:
+          - Sid: 1
+            Effect: Allow
+            Action: 
+              - sns:Publish
+            Resource: !Ref Topic
+            Principal:
+              Service: s3.amazonaws.com
+            Condition:
+              ArnLike:
+                aws:SourceArn: !Sub arn:aws:s3:::${Name}
+      Topics: 
+        - !Ref Topic
+
+  TopicSubscription:  
+    Type: AWS::SNS::Subscription
+    Properties: 
+      Endpoint: !Ref Email
+      Protocol: email
+      TopicArn: !Ref Topic
+
+  Queue:
+    Type: AWS::SQS::Queue
+    Properties: 
+      QueueName: !Ref Name
+
+  QueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties: 
+      PolicyDocument:
+        Id: 1
+        Version: "2012-10-17"
+        Statement:
+          - Sid: 1
+            Effect: Allow
+            Action: 
+              - sqs:SendMessage
+            Resource: !GetAtt Queue.Arn
+            Principal: 
+              Service: s3.amazonaws.com
+            Condition:
+              ArnLike:
+                aws:SourceArn: !Sub arn:aws:s3:::${Name}
+      Queues: 
+        - !Ref Queue
+
+  Lambda:
+      Type: AWS::Lambda::Function
+      Properties:
+        FunctionName: !Ref Name
+        Handler: index.lambda_handler
+        Role: !GetAtt LambdaRole.Arn
+        Runtime: nodejs12.x
+        Code:
+          ZipFile: |
+            exports.lambda_handler = async (event, context) => {
+              const util = require('util');
+              console.log(util.inspect(event,false,null));
+              console.log(util.inspect(context,false,null));
+              return 'hello';
+            }
+
+
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns: 
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+
+  LambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt Lambda.Arn
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub arn:aws:s3:::${Name}
+
+  S3:
+    Type: AWS::S3::Bucket
+    DependsOn:
+      - LambdaPermission
+      - QueuePolicy
+      - TopicPolicy
+    Properties:
+      BucketName: !Ref Name
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: suffix
+                    Value: .lambda
+            Function: !GetAtt Lambda.Arn
+        QueueConfigurations:
+          - Event: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: suffix
+                    Value: .sqs
+            Queue: !GetAtt Queue.Arn
+        TopicConfigurations:
+          - Event: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: suffix
+                    Value: .sns
+            Topic: !Ref Topic
+      
