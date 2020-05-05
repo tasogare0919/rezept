@@ -1,0 +1,74 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Parameters:
+  Name:
+    Description: identifier
+    Type: String
+    Default:  sqs-lambda-event
+Resources:
+  Queue1:
+    Type: AWS::SQS::Queue
+    Properties: 
+      QueueName: !Sub ${Name}1
+  
+  Queue2:
+    Type: AWS::SQS::Queue
+    Properties: 
+      QueueName: !Sub ${Name}2
+
+  EventSourceMapping1:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties: 
+      Enabled: true
+      EventSourceArn: !GetAtt Queue1.Arn
+      FunctionName: !GetAtt Lambda.Arn
+      BatchSize: 1
+
+  EventSourceMapping2:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties: 
+      Enabled: true
+      EventSourceArn: !GetAtt Queue2.Arn
+      FunctionName: !GetAtt Lambda.Arn
+      BatchSize: 10
+
+  Lambda:
+      Type: AWS::Lambda::Function
+      Properties:
+        FunctionName: !Ref Name
+        Handler: index.lambda_handler
+        Role: !GetAtt LambdaRole.Arn
+        Runtime: nodejs12.x
+        Code:
+          ZipFile: |
+            exports.lambda_handler = async (event, context) => {
+              const util = require('util');
+              console.log(util.inspect(event,false,null));
+              return 200;
+            }
+
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns: 
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+      Policies:
+        - PolicyName: sqs-access
+          PolicyDocument:
+            Statement:
+              - Sid: 1
+                Effect: Allow
+                Action:
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                  - sqs:ReceiveMessage
+                Resource:
+                  - !GetAtt Queue1.Arn
+                  - !GetAtt Queue2.Arn
